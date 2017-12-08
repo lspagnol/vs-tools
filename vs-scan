@@ -1,0 +1,64 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: show vservers status for on remote hosts
+#
+#Args:   [ --host <host> ]
+#        [ --name <vserver> ]
+#
+#  * Remote status are available for master host only.
+#
+#  * If nothing is specified, all available hosts and vservers will be
+#    displayed.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--host)
+			shift
+			HOST=$1
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+		--local)
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+hosts_list=$(get_hosts_list)
+
+[ "$(get_hosts_list)" ] || abort "'$(hostname -s)' is not a master vserver"
+
+if [ "$HOST" ] && [ "$NAME" ] ; then
+	get_remote_vserver_state $HOST $NAME |sort
+elif [ "$HOST" ] && [ ! "$NAME" ] ; then
+	get_remote_vservers_state $HOST |sort
+elif [ ! "$HOST" ] && [ "$NAME" ] ; then
+	get_remote_vserver_state_all $NAME |sort
+else
+	get_remote_vservers_state_all |sort
+fi
+
+success

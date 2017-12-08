@@ -1,0 +1,29 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+network=$(vserver $1 exec ifconfig |grep "Bcast:" |awk '{print $3}' |cut -d: -f2)
+log "Ping network '$network' from vserver '$1'"
+vserver $1 exec ping -b -n -c10 -i1 $network 2>/dev/null >/dev/null &
+
+net_dev=$(get_net_dev $1)
+if [ "$(test_vlan_dev $net_dev)" ] && [ -f /etc/vs-tools/networks.conf ] ; then
+	vlan=$(echo $net_dev |cut -d"." -f2)
+	result=$(grep ^$vlan: /etc/vs-tools/networks.conf)
+	if [ "$result" ] ; then
+		gateway=$(echo "$result" |cut -d":" -f3)
+		log "Ping gateway '$gateway' from vserver '$1'"
+		vserver $1 exec ping -n -c10  -i1 $gateway 2>/dev/null >/dev/null &
+	fi
+fi
+
+/usr/local/sbin/vs-monitor --name $1 --start >/dev/null
+
+if [ "$(test_running $1)" ] ; then
+	log "VSERVER '$1' IS RUNNING"
+else
+	log "STARTING VSERVER '$1' HAS FAILLED"
+fi
+
+success

@@ -1,0 +1,97 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage: $(basename $0) <Args>
+#
+#Function: manage packages for vservers
+#
+#Args:                  --name <vserver>
+#
+#                     [ --update_sources ]
+#
+#
+#                     [ --list_upgrades ]
+#                     [ --upgrade <pkg> ]
+#                     [ --upgrade_all ]
+#
+#                     [ --search <pkg> ]
+#                     [ --show <pkg> ]
+#
+#                     [ --install <pkg> ]
+#                     [ --remove <pkg> ]
+#                     [ --purge_download ]
+#
+#  * Nothing than '--name': list of installed packages
+#
+EOF
+}
+
+# --------------------------------------------------------------------------------------
+
+ARGS="$@"
+
+while [ $# -gt 0 ] ; do
+	case $1 in
+		--help)
+			help
+			exit 0
+			;;
+		--update_sources|--upgrade|--upgrade_all|--install)
+			FW=1
+			;;
+		--upgrade|--upgrade_all|--install)
+			PURGE=1
+			;;
+		--name)
+			NAME=$2
+			;;
+		--upgrade|--install|--remove|--search|--show)
+			if [ ! "$2" ] ; then
+				abort "pkg name is required"
+			fi
+			;;
+	esac
+	shift
+done
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+        
+if [ ! "$(test_dirs $NAME)" ] ; then
+	abort "vserver '$NAME' was not found"
+fi
+
+if [ ! "$(test_running $NAME)" ] ; then
+	abort "vserver '$NAME' is not running"
+fi
+
+if [ "$(apt-get --version 2>/dev/null >/dev/null && echo ok)" ] ; then
+	METHOD=debian
+elif [ "$(rpm --version 2>/dev/null >/dev/null && echo ok)" ] ; then
+	METHOD=redhat
+	echo "rpm is not implemented yet"
+fi
+
+if [ "$FW" ] ; then
+	vs-net --name $NAME --fw down >/dev/null
+fi
+
+sh /usr/lib/vs-tools/vs-pkg.$METHOD $ARGS
+
+if [ "$FW" ] ; then
+	vs-net --name $NAME --fw up >/dev/null
+fi
+
+if [ "$PURGE" ] ; then
+	vs-pkg --name $NAME --purge_download
+fi
+
+success

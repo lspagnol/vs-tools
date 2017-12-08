@@ -1,0 +1,21 @@
+## ----------------------------------------------------------------------
+## Probably no need to change something after this ...
+## ----------------------------------------------------------------------
+
+## Path for snapshots mounts
+SDIR=/snapshots
+
+## Networks (routes, vlans, domains and nameservers)
+NETWORKS_CONF=/etc/vs-tools/networks.conf
+
+## Slave hosts
+SLAVES_CONF=/etc/vs-tools/slaves.conf
+
+## Vservers backups
+BACKUP_CONF=/etc/vs-tools/backup.conf
+
+## Iptables
+IPTABLES=/sbin/iptables
+
+## Context counter
+CONTEXT_COUNTER=/etc/vservers/.defaults/context.next

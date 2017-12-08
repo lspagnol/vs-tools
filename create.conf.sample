@@ -1,0 +1,47 @@
+## ----------------------------------------------------------------------
+## DEFAULT VALUES for vs-create
+## Uncomment and edit the following lines
+## ----------------------------------------------------------------------
+
+## The physical NIC that will be used by the vservers
+DEFAULT_DEVICE=eth0
+
+## 'networks.conf' parameters have priority
+#DEFAULT_DOMAIN=foo.bar
+#DEFAULT_NAMESERVER=a.b.c.d
+#DEFAULT_PREFIX=24
+#DEFAULT_VLAN=6
+
+## May fix troubles with NICs that doesn't like 802.1q VLANs (Tulip ...)
+#MTU=1496
+
+## Context generator
+## vlan-id > 1 and < 49  : use 'dec' : ((1000*vlan-id)+ip)
+## vlan-id > 1 and < 192 : use 'hex' : (hex2dec(dec2hex vlan-id)(dec2hex ip))
+## vlan-id >=192         : use 'cnt' : incremental counter
+## If unspecified, you will give context value yourself for vs-create
+#CONTEXT_METHOD=dec
+
+## Limits in MB 
+DEFAULT_DISK_LIMIT=1024
+DEFAULT_RSS_LIMIT=128
+DEFAULT_TMPFS_LIMIT=16
+
+DEFAULT_PROC_LIMIT=150
+DEFAULT_CPU_LIMIT=8/10
+
+## Fake real OS release
+## If unspecified, will use host's short OS release
+#FAKE_OS=2.6.8
+
+## By default, method that will be used for building vservers
+## Available values: debootstrap, template
+#DEFAULT_METHOD=debootstrap
+
+## Used with "debootstrap" method
+DEFAULT_DISTRO=etch
+MAIN_MIRROR=ftp://ftp.fr.debian.org/debian
+UPDATE_MIRROR=http://security.debian.org
+
+## Default file for "template" method
+#DEFAULT_TEMPLATE=/vservers/TEMPLATES/template.tgz

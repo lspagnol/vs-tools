@@ -1,0 +1,86 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: show vserver or host statistics
+#
+#Args:   [ --host [<host>] ]
+#        [ --name <vserver> ]
+#
+#  * Remote statistics are available for master host only.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+HOST=_
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--host)
+			if [ "$2" ] ; then
+				if [ "$2" != "--name" ] ; then
+					HOSTS_LIST=$(get_hosts_list)
+					if [ ! "$HOSTS_LIST" ] ; then 
+						abort "'$(hostname -s)' is not a master vserver"
+					fi
+					shift
+					HOST=$1
+				fi
+			fi
+			;;
+		--name)
+			if [ "$2" ] && [ "$2" != "--host" ] ; then
+				shift
+				NAME=$1
+			fi
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ "$HOST" == "_" ] ; then
+
+	if [ "$NAME" ] ; then
+		vs-functions get_vserver_stats $NAME
+	else
+		vs-functions get_host_stats
+	fi
+
+else
+
+	if [ ! "$(test_ping $HOST)" ] ; then
+		echo "$HOST:UNREACHABLE"
+		exit 1
+	fi
+
+	if [ ! "$(test_ssh $HOST)" ] ; then
+		echo "$HOST:DENIED"
+		exit 1
+	fi
+
+	if [ "$NAME" ] ; then
+		ssh $HOST "vs-functions get_vserver_stats $NAME" $LABEL
+	else
+		ssh $HOST "vs-functions get_host_stats" $LABEL
+	fi
+
+fi
+
+success

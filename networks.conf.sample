@@ -1,0 +1,10 @@
+## ----------------------------------------------------------------------
+## This file permit to use several networks on the host
+## Uncomment and edit the following lines
+## ----------------------------------------------------------------------
+
+## vlan_id:network/prefix:gateway[:nameserver:domain]
+
+#1:10.0.1.0/24:10.0.1.1:10.0.3.6:foo.bar
+#2:10.0.2.0/24:10.0.2.1
+#3:10.0.3.0/24:10.0.3.1:10.0.3.5:foo.bar

@@ -1,0 +1,74 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+while [ $# -gt 0 ] ; do
+	case $1 in
+		--name)
+			shift
+			NAME=$1
+			;;
+
+		--update_sources)
+			CMD="apt-get -qq update"
+			;;
+		--list_upgrades)
+			CMD="apt-get -s -qq upgrade"
+			;;
+		--upgrade_all)
+			CMD="apt-get upgrade"
+			;;
+		--upgrade)
+			shift
+			CMD="apt-get install $1"
+			;;
+
+		--install)
+			shift
+			CMD="apt-get install $1"
+			;;
+		--remove)
+			shift
+			CMD="apt-get remove $1"
+			;;
+		--purge_download)
+			shift
+			CMD="apt-get clean"
+			;;
+
+		--search)
+			shift
+			CMD="apt-cache search $1"
+			;;
+		--show)
+			shift
+			CMD="apt-cache show $1"
+			;;
+	esac
+	shift
+done
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+        
+if [ ! "$(test_dirs $NAME)" ] ; then
+	abort "vserver '$NAME' was not found"
+fi
+                
+if [ ! "$(test_running $NAME)" ] ; then
+	abort "vserver '$NAME' is not running"
+fi
+
+if [ ! "$CMD" ] ; then
+	log "vserver $NAME exec dpkg-query -W"
+	vserver $NAME exec dpkg-query -W |awk '{print $1" "$2}'
+	success
+#	CMD="dpkg-query -W |awk '{print $\1\" \"\$2}'"
+fi
+
+log "vserver $NAME exec $CMD"
+vserver $NAME exec $CMD
+
+success

@@ -1,0 +1,82 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage: $(basename $0) <Args>
+#
+#Function: create or remove snapshots for /vservers
+#
+#Args:			[ --on | --off ]
+#
+#  * '--on' create and activate and mount snapshot
+#
+#  * '--off' disable and remove snapshot
+#
+#  * shows status if no action given
+#
+#  * Snapshots applys on LVM device $(get_lvm_device)
+#
+#  * Snapshots are mounted on $SDIR
+#
+#  * Output format:
+#    <host name>:<snapshot state>:<mount state>
+#
+#  * WARNING: They MUST be removed in the mode (hot/cold)
+#             used for their creation.
+#             So it is impossible to start or stop a vserver
+#             when a snapshot is active.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--on)
+			action=on
+			;;
+		--off)
+			action=off
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$(get_lvm_device)" ] ; then
+	abort "'$VDIR' is not mounted on a lvm device"
+fi
+
+if [ "$action" == "on" ] ; then
+	snapshot_on
+elif [ "$action" == "off" ] ; then
+	snapshot_off
+fi
+
+echo -en "$(hostname -s):"
+
+if [ "$(test_snapshot)" ] ; then
+	echo -en "enabled"
+	if [ "$(mount |grep " on $SDIR ")" ] ; then
+		echo ":mounted"
+	else
+		echo ":unmounted"
+	fi
+else
+	echo "disabled:unmounted"
+fi
+
+success

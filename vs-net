@@ -1,0 +1,183 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: network helper for vservers, that permit to
+#          - set or show vlans, routes, and firewall status
+#          - check availability for <vserver> address
+#
+#Args:     --name <vserver name>
+#          --vlan up | down
+#          --route up | down
+#          --fw up | down
+#
+#        [ --check ]
+#        [ --all ]
+#
+#  * Routes and vlans are defined in $NETWORKS_CONF
+#
+#  * This command is automaticaly invoqued from vservers pre/post
+#    start/stop scripts ('$CDIR/<vserver>/scripts').
+#
+#  * Routes or vlans cannot be removed when they are used by a
+#    running vserver.
+#
+#  * Firewall rules may be independently defined for each vserver
+#    with '$CDIR/<vserver name>/firewall.conf'.
+#
+#  * '--check' will 'exit 1' if <vserver> address is used elsewhere.
+#    This feature is used to abort a vserver startup when his
+#    address is used elsewhere.
+#
+#  * '--all' will do action for all vservers
+#
+#  * Output format:
+#    <host name>:<vserver name>:<ip>:<vlan>:<route>:<fw IN>:<fw OUT>
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+
+		--all)
+			NAME="$(get_vservers_list)"
+			;;
+
+		--vlan)
+			case "$2" in
+				up)
+					VLAN=vlan_up
+					shift				
+				;;
+				down)
+					VLAN=vlan_down
+					shift
+				;;
+			esac
+			;;
+
+		--route)
+			case "$2" in
+				up)
+					ROUTE=route_up
+					shift
+				;;
+				down)
+					ROUTE=route_down
+					shift
+				;;
+			esac
+			;;
+
+		--fw)
+			case "$2" in
+				up)
+					FW=fw_up
+					shift
+				;;
+				down)
+					FW=fw_down
+					shift
+				;;
+			esac
+			;;
+
+		--check)
+			CHECK=1
+		;;
+
+	esac
+
+	shift
+
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+
+if [ "$CHECK" ] ; then
+	if [ ! "$(test_dirs $NAME)" ] ; then
+		abort "vserver '$NAME' was not found"
+	fi
+	ip=$(get_ip_address $NAME)
+	if [ "$(test_ping $ip)" ] ; then
+		abort "'$ip' is used somewhere"
+	fi
+	exit
+fi
+
+for name in $NAME ; do
+
+	if [ ! "$(test_dirs $name)" ] ; then
+		abort "vserver '$name' was not found"
+	fi
+
+	echo -en "$(hostname -s):$name:"
+
+	if [ "$VLAN" ] ; then
+		$VLAN $name
+	fi
+	
+	if [ "$ROUTE" ] ; then
+		$ROUTE $name
+	fi
+	
+	if [ "$FW" ] ; then
+		$FW $name
+	fi
+
+	ip=$(get_ip_address $name)
+	interface=$(get_net_dev $name)
+	if [ "$(ip addr ls $interface 2>/dev/null |grep "inet $ip/")" ] ; then
+		echo -en "up:"
+	else
+		echo -en "down:"
+	fi
+		
+	result=$(test_vlan $name)
+	if [ "$result" ] ; then
+		echo -en "$result:"
+	else
+		echo -en "none:"
+	fi
+
+	result=$(test_route $name)
+	if [ "$result" ] ; then
+		echo -en "$result:"
+	else
+		echo -en "none:"
+	fi
+
+	result=$(test_fw $name)
+	if [ "$result" ] ; then
+		echo "$result"
+	else
+		echo "none"
+	fi
+	
+done
+
+success

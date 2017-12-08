@@ -1,0 +1,25 @@
+#!/bin/bash
+
+for vserver in $(vs-control --all |grep :running$ |cut -d":" -f2) ; do
+
+	echo -en "Updating packages sources for vserver '$vserver': "
+	result="$(vs-pkg --name $vserver --update_sources)"
+	if [ "$result" ] ; then
+		echo
+		echo "$result"
+	else
+		echo done
+	fi
+		
+	echo -en "Available upgrades for vserver '$vserver': "
+	result="$(vs-pkg --name $vserver --list_upgrades)"
+	if [ "$result" ] ; then
+		echo
+		echo "$result"
+	else
+		echo none
+	fi
+	
+	echo
+
+done

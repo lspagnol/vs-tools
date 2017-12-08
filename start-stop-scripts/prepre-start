@@ -1,0 +1,23 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+log "VSERVER '$1' IS STARTING"
+
+if [ -f /var/lock/vs-snapshot ] ; then
+	# Forbid startup if snapshot is active
+	echo "Please disable snapshot first !"
+	exit 1
+fi
+
+ip=$(get_ip_address $1)
+if [ "$(test_ping $ip)" ] ; then
+	# Forbid startup if address is already used
+	echo "'$ip' is already in use"
+	exit 1
+fi
+
+vlan_up $1
+fw_up $1
+
+success

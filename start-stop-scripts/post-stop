@@ -1,0 +1,8 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+fw_down $1
+
+success

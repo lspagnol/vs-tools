@@ -1,0 +1,38 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+if [ ! "$1" ] || [ "$1" == "--help" ] ; then
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: invocate library (functions.sh) from shell
+#
+#Args:     <function> <args>
+#
+#        [ --help ]
+#        [ --list ]
+#        [ --version ]
+#
+#  * '--help' will display this help.
+#
+#  * '--list' will display functions list
+#
+#  * '--version' will display the 'vs-tools' package version.
+#
+EOF
+exit
+fi
+
+case $1 in
+	--list)
+		cat /usr/lib/vs-tools/functions.sh |grep "^#" |sed -e "s/^#//g"
+		exit
+	;;
+	--version)
+		cat /usr/lib/vs-tools/version
+		exit
+	;;
+esac
+
+$@

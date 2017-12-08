@@ -1,0 +1,18 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+log "VSERVER '$1' IS STOPPING"
+
+if [ -f /var/lock/vs-snapshot ] ; then
+	# Forbid shutdown if snapshot is active
+	echo "Please disable snapshot first !"
+	echo
+	echo
+	echo "Failed to stop vserver 'munin'"
+	exit 1
+fi
+
+/usr/local/sbin/vs-monitor --name $1 --stop >/dev/null
+
+success

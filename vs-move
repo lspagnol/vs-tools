@@ -1,0 +1,218 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: move <vserver> from <src host> to <dst host>
+#
+#Args:     --name <vserver name>
+#        [ --src_host <src host> ]
+#          --dst_host <dst host>
+#
+#        [ --1pass ]
+#
+#  * This command is for master host only.
+#
+#  * Using of snapshots is automatic.
+#
+#  * If <host name> is unspecified, this command will try
+#    to select it automaticaly.
+#
+#  * <vserver> will be automatically:
+#    - disabled on this master host
+#    - disabled and stopped on <src host>
+#    - started on <dst host>
+#    - enabled (if necessary) on <dst host>
+#
+#  * By default, <vserver> will be moved in two steps:
+#
+#    1 - snapshot is enabled
+#      - hot copy <vserver> from <src host>
+#      - hot copy <vserver> to <dst host>
+#
+#    2 - snapshot is disabled
+#      - <vserver> is stopped
+#      - cold copy <vserver> from <src host>
+#      - cold copy <vserver> to <dst host>
+#
+#  * '--1pass' will force 'step 2' cold copy.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--src_host)
+			shift
+			SRC_HOST=$1
+			;;
+		--dst_host)
+			shift
+			DST_HOST=$1
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+		--1step)
+			STEP=1
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$(get_hosts_list)" ] ; then
+	abort "'$(hostname -s)' is not a master vserver"
+fi
+
+if [ ! "$NAME" ] ; then
+	abort "'--name' missing"
+fi
+
+if [ ! "$DST_HOST" ] ; then
+	abort "'--dst_host' missing"
+fi
+
+if [ "$(test_running $NAME)" ] ; then
+	abort "vserver is already running here"
+fi
+
+if [ ! "$(test_ping $DST_HOST)" ] ; then
+	abort "'$DST_HOST' host unreachable"
+fi
+
+if [ ! "$(test_ssh $DST_HOST)" ] ; then
+	abort "'$DST_HOST' ssh access denied"
+fi
+
+if [ "$(ssh $DST_HOST "vs-functions test_running $NAME")" ] ; then
+	abort "vserver is already running on destination host"
+fi
+
+echo -en "Scanning vservers hosts... "
+SCAN=$(get_remote_vserver_state_all $NAME)
+echo "done"
+if [ ! "$SCAN" ] ; then
+	abort "unable to find vserver"
+fi
+echo "$SCAN"
+if [ $(echo "$SCAN" |wc -l) -gt 1 ] ; then
+	warning "vserver was found on several hosts"
+fi
+
+if [ ! "$SRC_HOST" ] ; then
+	SRC_HOST=$(select_vserver_host $NAME)
+	if [ ! "$SRC_HOST" ] ; then
+		abort "unable to select host"
+	fi
+fi
+
+if [ ! "$(test_ping $SRC_HOST)" ] ; then
+	abort "' $SRC_HOST' host unreachable"
+fi
+
+if [ ! "$(test_ssh $SRC_HOST)" ] ; then
+	abort "'$SRC_HOST' ssh access denied"
+fi
+
+warning "vserver will be downloaded from host '$SRC_HOST'"
+warning "vserver will be uploaded to host '$DST_HOST'"
+
+if [ "$(ssh $SRC_HOST "vs-functions test_autostart $NAME")" ] ; then
+	src_enabled=1
+fi
+
+if [ "$(ssh $SRC_HOST "vs-functions test_running $NAME")" ] ; then
+	src_running=1
+fi
+
+if [ $src_running ] || [ ! "$STEP" ] ; then
+	notice "vserver will be moved in two steps"
+else
+	 notice "vserver will be moved in one step"
+fi
+
+confirm
+
+d1=$(date +%s)
+
+if [ "$src_running" ] && [ "$STEP" ] ; then
+
+	log "vserver is running"
+	log "cold move request"
+	
+	dd1=$(date +%s)
+	log "ssh $SRC_HOST vs-functions stop $NAME"
+	ssh $SRC_HOST "vs-functions stop $NAME"
+
+	get_vserver $SRC_HOST $NAME
+	put_vserver $DST_HOST $NAME
+
+	log "ssh $DST_HOST vs-functions start $NAME"
+	ssh $DST_HOST "vs-functions start $NAME"
+	dd2=$(date +%s)
+
+elif [ "$src_running" ] && [ ! "$STEP" ] ; then
+
+	log "vserver is running"
+	log "hot move request"
+
+	log "moving vserver step 1/2"
+
+	get_vserver $SRC_HOST $NAME
+	put_vserver $DST_HOST $NAME
+
+	dd1=$(date +%s)
+	log "ssh $SRC_HOST vs-functions stop $NAME"
+	ssh $SRC_HOST "vs-functions stop $NAME"
+
+	log "moving vserver step 2/2"
+
+	get_vserver $SRC_HOST $NAME
+	put_vserver $DST_HOST $NAME
+
+	log "ssh $DST_HOST vs-functions start $NAME"
+	ssh $DST_HOST "vs-functions start $NAME"
+	dd2=$(date +%s)
+
+elif [ ! "$src_running" ] ; then
+
+	log "vserver is stopped"
+	log "cold move request"
+
+	get_vserver $SRC_HOST $NAME
+	put_vserver $DST_HOST $NAME
+
+fi
+
+if [ "$src_enabled" ] ; then
+	log "ssh $SRC_HOST vs-functions disable $NAME"
+	ssh $SRC_HOST "vs-functions disable $NAME"
+	log "ssh $DST_HOST vs-functions enable $NAME"
+	ssh $DST_HOST "vs-functions enable $NAME"
+fi
+
+d2=$(date +%s)
+
+notice "the vserver was moved in $(( $d2 - $d1 )) seconds"
+if [ "$dd1" ] && [ "$dd2" ] ; then
+	notice "the vserver was stopped for $(( $dd2 - $dd1 )) seconds"
+fi
+
+success

@@ -1,0 +1,172 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: backup vservers from remote hosts
+#
+#Args:   [ --host <host name> ]
+#
+#  * This command is for master host only.
+#
+#  * All slaves hosts are defined in '/etc/vs-tools/vs-tools.conf'.
+#
+#  * All vservers are defined in '/etc/vs-tools/backup.conf'. This
+#    file also permit to specify backup mode (hot/cold) for each of
+#    them.
+#
+#  * Vservers are automatically disabled on master host.
+#
+#  * By default, all vservers on all hosts will be backed up.
+#
+#  * '--host' <host name> will limit backup to this host.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--host)
+			shift
+			HOST=$1
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$(get_hosts_list)" ] ; then
+	abort "'$(hostname -s)' is not a master vserver"
+fi
+
+if [ ! -f /etc/vs-tools/backup.conf ] ; then
+	abort "/etc/vs-tools/backup.conf is required"
+fi
+
+vservers=$(cat /etc/vs-tools/backup.conf |egrep -v "^#|^$" |cut -d":" -f1)
+
+d1=$(date +%s)
+
+for vserver in $vservers ; do
+
+	notice "*** STARTING BACKUP for vserver '$vserver'"
+	host=$(select_vserver_host $vserver)
+
+	if [ "$host" ] ; then
+		notice "Selected host: '$host'"
+
+		mode="$(cat /etc/vs-tools/backup.conf |grep "^$vserver:" |cut -d":" -f2)"
+		notice "Backup mode: $mode"
+
+		if [ "$(ssh $host "vs-functions test_running $vserver")" ] ; then
+			notice "Vserver state: 'running'"
+			running=1
+		else
+			notice "Vserver state: 'stopped'"
+		fi
+        
+		dd1=$(date +%s)
+		case $mode in
+			hot)
+				get_vserver $host $vserver
+			;;
+			cold)
+				if [ "$running" ] ; then
+					log "$host vs-functions stop $vserver"
+					ssh $host "vs-functions stop $vserver"
+				fi
+				get_vserver $host $vserver
+				if [ "$running" ] ; then
+					log "ssh $host vs-functions start $vserver"
+					ssh $host "vs-functions start $vserver"
+				fi
+			;;
+		esac
+		dd2=$(date +%s)
+		notice "*** BACKUP DONE in $(( $dd2 - $dd1 )) seconds"
+		echo
+
+	else
+
+		notice "*** UNABLE TO SELECT HOST"
+		echo
+
+	fi
+
+done
+
+d2=$(date +%s)
+
+notice "Backup was done in $(( $d2 - $d1 )) seconds"
+
+exit
+
+if [ "$HOST" ] ; then
+	hosts_list=$HOST
+fi
+
+d1=$(date +%s)
+
+for host in $HOSTS_LIST ; do
+	if [ "$(test_ping $host)" ] ; then
+		result="$(vs-scan --host $host |grep ":enabled:running")"
+		VSERVERS="$(echo "$result" |cut -d ":" -f2)"
+		if [ "$VSERVERS" ] ; then
+			for vserver in $VSERVERS ; do
+				backup_mode="$(cat /etc/vs-tools/backup.conf |grep "^$vserver:" |cut -d":" -f2)"
+				case "$backup_mode" in
+					hot)
+						notice "*** STARTING HOT BACKUP for vserver '$vserver' hosted on '$host'"
+						ssh $host vs-snapshot --on 2>/dev/null >/dev/null
+						vs-get --name $vserver --host $host --assume_yes
+						ssh $host vs-snapshot --off 2>/dev/null >/dev/null
+						notice "*** BACKUP DONE"
+						echo
+					;;
+					cold)
+						notice "*** STARTING COLD BACKUP for vserver '$vserver' hosted on '$host'"
+						ssh $host vserver $vserver stop 2>/dev/null >/dev/null
+						vs-get --name $vserver --host $host --assume_yes
+						ssh $host vserver $vserver start 2>/dev/null >/dev/null
+						notice "*** BACKUP DONE"
+						echo
+					;;
+				esac
+			done
+		else
+			notice "Host '$host' is empty"
+		fi
+	else
+		notice "Host '$host' is unreachable"
+	fi
+done
+
+d2=$(date +%s)
+
+notice "Backup was done in $(( $d2 - $d1 )) seconds"
+
+echo
+echo "Please check results:"
+echo "---------------------"
+echo
+get_vservers_state |sort
+echo
+vs-scan |sort
+echo
+
+success

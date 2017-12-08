@@ -1,0 +1,102 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: download <vserver> from <vservers host>
+#
+#Args:     --name <vserver name>
+#        [ --host <host name> ]
+#
+#  * This command is for master host only.
+#
+#  * Using of snapshots is automatic.
+#
+#  * If <host name> is unspecified, this command will try
+#    to select it automaticaly.
+#
+#  * <vserver> is automatically disabled on local host.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			success
+			;;
+		--host)
+			shift
+			HOST=$1
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$(get_hosts_list)" ] ; then
+	abort "'$(hostname -s)' is not a master vserver"
+fi
+
+if [ "$HOST" ] ; then
+	if [ ! "$(test_ping $HOST)" ] ; then
+		abort "host unreachable"
+	fi
+	if [ ! "$(test_ssh $HOST)" ] ; then
+		abort "ssh access denied"
+	fi
+fi
+
+if [ ! "$NAME" ] ; then
+	abort "'--name' missing"
+fi
+
+if [ "$(test_running $NAME)" ] ; then
+	abort "vserver is already running here"
+fi
+
+echo -en "Scanning vservers hosts... "
+SCAN=$(get_remote_vserver_state_all $NAME)
+echo "done"
+if [ ! "$SCAN" ] ; then
+	abort "unable to find vserver"
+fi
+echo "$SCAN"
+if [ $(echo "$SCAN" |wc -l) -gt 1 ] ; then
+	warning "vserver was found on several hosts"
+fi
+
+if [ ! "$HOST" ] ; then
+	HOST=$(select_vserver_host $NAME)
+	if [ ! "$HOST" ] ; then
+		abort "unable to select host"
+	fi
+fi
+
+warning "vserver will be downloaded from host '$HOST'"
+
+confirm
+
+d1=$(date +%s)
+get_vserver $HOST $NAME
+d2=$(date +%s)
+
+notice "the vserver was downloaded in $(( $d2 - $d1 )) seconds"
+
+success

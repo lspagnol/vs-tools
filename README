@@ -1,0 +1,304 @@
+
+   This software was initially written for Debian/Sarge, then for Debian/Etch.
+   It is designed to work in a util-vserver / linux-vserver environment.
+   ... See links at the end of this file ...
+
+
+** FEATURES **
+--------------
+
+The base idea was to give a simple way to :
+ - manage several networks for all hosts (802.1q vlans, iproute2)
+   -> dedicate a network for vservers's hosts
+ - apply network filters independently for each vserver
+ - monitor each vserver (daemons and material resources)
+   -> improved availability and safety
+ - manage a pool of hosts and vservers
+ - manage the pool from a 'master host'
+   -> completely transparent vservers move
+   -> backup of vservers without knowledge of localization
+ - use LVM snapshots
+   -> 'cold' and 'hot' backups
+   -> reduced interruption of service
+ - control mtu for 802.1q interfaces
+ - create virtual servers with only 3 arguments
+ - avoiding the crush and crash of vservers
+
+A lot of ugly things are required with Debian/Sarge hosts, wich requires :
+ - linux-2.6.17.13
+ - patch-2.6.17.13-vs2.0.2.1
+ - util-vserver-0.30.210
+ - LVM2.2.02.01
+ - device-mapper.1.02.02
+ - a good knowledge about kernel compilation
+ - free time ...
+
+But fortunately, Debian/Etch is now the official 'stable' release :
+ - a 'linux-vserver' kernel package is available
+ - kernel 2.6.18 solves some troubles with routing and LVM
+ - releases of 'util-vserver' and 'linux-vserver' kernel patch are recent
+
+
+** INSTALL **
+-------------
+
+== First step ==
+
+* Download and burn "debian-40r0-i386-netinst.iso"
+
+* Boot computer from this disk
+
+* I always use :
+  - 100 MB for /boot (ext3)
+  - 256 MB for swap
+  - 1 GB for / (ext3)
+    (2 GB are recommended to make your own kernel)
+  - All available disk space for LVM Volume Group 'vg1'
+    90 percents of this Volume Group for LVM Logical Volume 'vl1'
+    Mount this Logical Volume to '/var/lib/vservers' (ext3)
+    => The unused space is required for LVM snapshots
+       (Note that LVM is facultative for 'master' host)
+
+* I always choose the most basic install (no GUI, nothing other than
+  the base system ...)
+
+* Reboot the computer ...
+
+== Second step ==
+
+* Install some usefull packages :
+  # apt-get install ntpdate wget ncftp joe less lsof tcpdump
+
+* Install a MTA :
+  # apt-get install postfix
+  ==> You may configure Postfix to send ALL messages to another server :
+      Edit /etc/postfix/main.cf :
+       mydestination =                  (EMPTY, relay all messages)
+       myhostname = *blabla*            (FQDN for this host)
+       relayhost = *blabla*             (ip address for relay host)
+       mynetworks_style = host          (accept only local connexions)
+       inet_interfaces = loopback-only  (listen on loopback)
+  ==> Remember that kernel will always use the easyest way to talk with
+      another host : see '** Routing and Firewalling **'
+
+* Install required packages :
+  # apt-get install ssh rsync lvm2 vlan mawk sed findutils mailx binutils bc
+
+* Edit /etc/fstab :
+  - Add option 'tagxid' to mount point '/var/lib/vservers'
+    Ex: /dev/mapper/vg1-vl1 /var/lib/vservers ext3 defaults 0 2
+    ==> /dev/mapper/vg1-vl1 /var/lib/vservers ext3 defaults,tagxid 0 2
+  - Copy this line and replace '/var/lib/vservers' with '/vservers'
+    (Note that two mountpoints are required)
+
+* Create /vservers dir :
+  # mkdir /vservers
+
+* Add 'net.ipv4.conf.all.promote_secondaries=1' to /etc/sysctl.conf
+  # echo "net.ipv4.conf.all.promote_secondaries=1">>/etc/sysctl.conf
+
+* Add '8021q' to /etc/modules :
+  # echo "8021q">>/etc/modules
+
+* Add 'iptables' to /etc/modules :
+  # echo "iptables">>/etc/modules
+
+* Check listening ports :
+  # netstat -npl
+  ==>  You MUST see only loopback and host's addresses
+  ==>  You MUST disable or configure services that are
+       listening on every addresses (0.0.0.0)
+  - you MUST change sshd config :
+    edit /etc/ssh/sshd_config :
+    add option 'ListenAddress <address_for_this_host>'
+    # echo "ListenAddress $(hostname -i)" >> /etc/ssh/sshd_config
+    # /etc/init.d/ssh restart
+  - you may remove some packages :
+    # apt-get remove nfs-common portmap
+  - you may disable some daemons :
+    # update-rc.d -f openbsd-inetd remove
+
+* Install the linux-vserver kernel:
+  # apt-get install linux-image-vserver-686
+  (Note that 'linux-image-vserver-k7' is also available)
+
+* Reboot the computer ...
+
+== Third step ==
+
+* Install the userspace utilities :
+  # apt-get install util-vserver
+
+* Set 'barrier' attribute :
+  # setattr --barrier /vservers/
+
+* Install contents of 'vs-tools' tarball
+  # cd /usr/src
+  # cp <path>/vs-tools-aaaammdd-n.tgz .
+  # tar -xzf vs-tools-aaaammdd-n.tgz
+  # cd vs-tools
+  # sh install.sh
+
+* Check your util-vserver / linux-vserver environment :
+  # sh testme.sh
+
+* Edit /etc/vs-tools/vs-tools.conf
+  This file contains some default values
+
+* Edit /etc/vs-tools/networks.conf
+  This file describes all vlan / networks for this host
+
+== For 'master host' ONLY ==
+
+ This host will get / put vservers on / from all other hosts
+ It doesn't have to run vservers, but it must have a lot of disk space !
+ (Note that only one backup agent is required : the 'master host' one)
+
+* Create private/public keys : ('no passphrase' is good idea)
+  # ssh-keygen -t dsa
+
+* Install public key for every 'slave host' :
+  # for s in host1 host2 host3 .... ; do ssh $s mkdir /root/.ssh ; \
+  scp /root/.ssh/id_dsa.pub $s:/root/.ssh/authorized_keys2 ; done
+
+* Check that 'master host' is able to talk with all 'slave hosts' without
+  passwords :
+  # for s in host1 host2 host3 .... ; do ssh $s pwd ; done
+
+* Edit /etc/vs-tools/slaves.conf
+  Edit this file with names of slave hosts
+
+* Edit /etc/vs-tools/backup.conf
+  This file contains vserver names and their backup mode
+
+
+** USAGE **
+-----------
+
+This software gives two sets of Bash scripts :
+(all commands are documented with '--help' option)
+
+* For all hosts :
+  vs-control        -> enable / disable, stop / start vservers
+  vs-create         -> create vservers
+  vs-pkg            -> update, install, remove packages on vservers
+  vs-net            -> manage vlans, routing, firewall for vservers
+  vs-stats          -> usage statistics about hosts and vservers
+  vs-limit          -> manage ressources limits for vservers
+  vs-monitor        -> vservers monitoring daemon
+  vs-snapshot       -> enable / disable snapshots
+  vs-functions      -> direct call to library
+
+* For 'master host' only :
+  vs-scan           -> report vservers state on every hosts
+  vs-get            -> get a vserver from a host
+  vs-put            -> put a vserver to a host
+  vs-move           -> move a vserver from a host to another host
+  vs-remove         -> remove a vserver form a host
+  vs-backup         -> backup all vservers
+
+* You may also use 'util-vserver' commands :
+  vserver <vserver_name> start     -> start <vserver_name>
+  vserver <vserver_name> stop      -> stop <vserver_name>
+  vserver <vserver_name> restart   -> restart <vserver_name>
+  vserver <vserver_name> enter     -> switch to <vserver_name> context
+  vserver-stat                     -> displays state of vservers that are
+                                      running
+
+
+** FAQS **
+----------
+
+Q - I have troubles with my network: i can ping, telnet or ssh an address, but
+    i can't copy files (scp, rsync, ftp ...).
+A - Some NIC drivers (as Tulip) doesn't like VLAN devices with 1500 bytes MTU.
+    You may solve this problem with a '1496' MTU in /etc/vs-tools/vs-tools.conf
+
+Q - How to enable firewalling for a vserver ?
+A - Edit '/etc/vservers/<vserver name>/firewall.conf':
+    - uncomment or add 'enable' keyword
+    - edit your rules
+    - restart firewall by 'vs-net --name <vserver name> --fw up'
+    Note that this file is a copy from /etc/vs-tools/firewall.conf
+
+Q - How to disable firewalling for a vserver ?
+A - Stop firewalling by 'vs-net --name <vserver name> --fw down', then edit
+    '/etc/vservers/<vserver name>/firewall.conf' and del or comment 'enable'
+    keyword.
+
+Q - How to enable monitoring for a vserver ?
+A - Edit '/etc/vservers/<vserver name>/monitor.conf
+    - uncomment and edit 'MONITOR_MAILTO' option
+    - edit 'THRESHOLD' and 'HIT' values
+    - restart monitor daemon by 'vs-monitor --name <vserver name> --start'
+
+Q - How to disable monitoring for a vserver ?
+A - Stop monitor daemon 'vs-monitor --name <vserver name> --stop', then edit
+    '/etc/vservers/<vserver name>/monitor.conf and comment 'MONITOR_MAILTO'
+    option.
+
+Q - My computer has 2 nics, how to use them ?
+A - I strongly recommend to dedicate to vservers the same nic on all hosts.
+    So i always use 'eth0' for vservers. You won't have problems by using
+    the second nic only for hosts.
+
+
+** ROUTING AND FIREWALLING **
+-----------------------------
+
+* Please consider the following diagram :
+
+   +---------------+---------------------------+
+   | VSERVER  HOST | -- vserver1 ('B' network) |
+   |               | -- vserver2 ('B' network) |
+   | ('A' network) | -- vserver3 ('C' network) |
+   +---------------+---------------------------+
+          ||
+ 8021.Q   ||            /-->  host1 ('B' network)
+  link    \\  +--------+
+            ==| ROUTER |--->  host2 ('C' network)
+              +--------+
+                        \-->  host3 (external network)
+
+  - a LAN that contains 3 networks :
+     'A' network : private network, dedicated for vservers hosts
+     'B' network : private network
+     'C' network : public / DMZ network
+  - a router for these 3 networks and link to external network (Internet)
+  - a vserver host on 'A' network (untagged ethernet frames)
+  - 3 vservers that are running on the vserver host
+     vserver1 : on 'B' network, tagged frames, vlan id 10
+     vserver2 : on 'B' network, tagged frames, vlan id 10
+     vserver3 : on 'C' network, tagged frames, vlan id 20
+  - 2 hosts, one on 'B' network and one on 'C' network
+  - 1 host on external network (Internet)
+
+* What it happens when a vserver is talking with another host ?
+
+* What it happens when a vserver host is talking with another host ?
+
+
+** USING RSYNCD INSTEAD OFF RSYNC/SSHD **
+-----------------------------------------
+
+* File transfers with may cause overhead on hosts and limits bandwidth.
+
+
+** LINKS **
+-----------
+
+http://linux-vserver.org
+https://savannah.nongnu.org/projects/util-vserver
+http://www.nongnu.org/util-vserver/doc/conf/configuration.html
+http://en.wikipedia.org/wiki/Virtualization
+
+http://fr.wikipedia.org/wiki/Virtualisation_(informatique)
+http://2005.jres.org/paper/109.pdf
+http://2005.jres.org/paper/111.pdf
+
+
+** BUGS , QUESIONS **
+---------------------
+
+Suggestions and bug reports are welcome ;)
+laurent [dot] spagnol [at] reims [dot] iufm [dot] fr

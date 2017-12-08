@@ -1,0 +1,108 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: remove <vserver> from <host>
+#
+#Args:     --name <vserver name>
+#          --host <vservers host>
+#
+#  * This command is for master host only.
+#
+#  * A running vserver cannot be removed.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--host)
+			shift
+			HOST=$1
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+HOSTS_LIST=$(get_hosts_list)
+
+if [ ! "$HOSTS_LIST" ] ; then
+	abort "'$(hostname -s)' is not a master vserver"
+fi
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+
+if [ ! "$HOST" ] ; then
+	abort "source host name missing"
+fi 
+
+if [ ! "$(test_ping $HOST)" ] ; then
+	abort "source host is unreachable"
+fi
+
+HOST=$(ssh $HOST hostname -s)
+
+echo -en "Scanning vservers hosts... "
+result="$(vs-scan --name $NAME)"
+echo "done"
+
+if [ ! "$(echo "$result" |grep "^$HOST:")" ] ; then
+	abort "vserver '$NAME' was not found on host '$HOST'"
+fi
+
+if [ "$(echo "$result" |grep "^$HOST:" |grep ":running")" ] ; then
+	abort "vserver '$NAME' is running on host '$HOST'"
+fi
+
+if [ ! $(echo "$result" |egrep ":enabled:|:disabled:" |wc -l) -gt 1 ] ; then
+	warning "vserver '$NAME' was not found on multiple hosts"
+fi
+
+if [ $(echo "$result" |egrep ":disabled:stopped" |wc -l) -gt 1 ] ; then
+	warning "vserver '$NAME' was found stopped on multiple host"
+fi
+
+if [ "$WARNING" ] ; then
+	vs-scan --name $NAME
+fi
+
+confirm
+
+d1=$(date +%s)
+
+remote_vdir=$(ssh $HOST vs-functions get_vdir)
+remote_cdir=$(ssh $HOST vs-functions get_cdir)
+
+echo -en "Removing vserver '$NAME' from host '$HOST'... "
+ssh $HOST "if [ -d $remote_vdir/$NAME ] ; then rm -rf $remote_vdir/$NAME ; fi"
+ssh $HOST "if [ -d $remote_cdir/$NAME ] ; then rm -rf $remote_cdir/$NAME ; fi"
+ssh $HOST "if [ -d /var/cache/vservers/$NAME ] ; then rm -rf /var/cache/vservers/$NAME ; fi"
+echo "done"
+
+d2=$(date +%s)
+notice "vserver '$NAME' was removed in $(( $d2 - $d1 )) seconds"
+
+success

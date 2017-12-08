@@ -1,0 +1,10 @@
+## ----------------------------------------------------------------------
+## This file describes vservers backups
+## Uncomment and edit the following lines ONLY on 'master' host
+## ----------------------------------------------------------------------
+
+## Backup modes: hot (use snapshot) or cold (stop vserver)
+## vserver_name:backup_mode
+
+#vserver1:hot
+#vserver2:cold

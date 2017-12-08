@@ -1,0 +1,15 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+route_down $1
+
+if [ ! "$(test_running $1)" ] ; then
+	log "VSERVER '$1' IS STOPPED"
+else
+	log "STOPPING VSERVER '$1' HAS FAILLED"
+fi
+
+success
+                

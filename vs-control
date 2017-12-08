@@ -1,0 +1,108 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: enable / disable autostart or show autostart status
+#          (control by /etc/init.d/vserver_default)
+#
+#Args:     --name <vserver name> / [ --all ]
+#
+#        [ --start | --stop ]
+#        [ --enable | --disable ]
+#
+#  * '--all' will do action for all vservers
+#
+#  * '--start | --stop' start or stop vserver
+#
+#  * '--enable | --disable' enable or disable control by init.d
+#
+#  * Output: <host name><vserver name>:<enabled|disabled>:<running|stopped>
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+		--all)
+			NAME="$(get_vservers_list)"
+			if [ ! "$NAME" ] ; then
+				echo "$(hostname -s):EMPTY"
+				success
+			fi
+			;;
+		--enable)
+			autostart=on
+			;;
+		--disable)
+			autostart=off
+			;;
+		--start)
+			running=on
+			;;
+		--stop)
+			running=off
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+
+for name in $NAME ; do
+
+	if [ ! "$(test_dirs $name)" ] ; then
+		abort "vserver '$name' was not found"
+	fi
+
+	echo -en "$(hostname -s):$name:"
+
+	if [ "$autostart" == "on" ] ; then
+		enable $name
+	elif [ "$autostart" == "off" ] ; then
+		disable $name
+	fi
+	
+	if [ "$(test_autostart $name)" ] ; then
+		echo -en "enabled:"
+	else
+		echo -en "disabled:"
+	fi
+	
+	if [ "$running" == "on" ] ; then
+		start $name
+	elif [ "$running" == "off" ] ; then
+		stop $name
+	fi
+	
+	if [ "$(test_running $name)" ] ; then
+		echo "running"
+	else
+		echo "stopped"
+	fi
+	
+done
+
+success

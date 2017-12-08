@@ -1,0 +1,116 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: vservers monitoring management
+#
+#Args:     --name <vserver name> / [ --all ]
+#
+#        [ --start ]
+#        [ --restart ]
+#        [ --stop ]
+#
+#  * '--all' will do action for all vservers on this host.
+#
+#  * Output format:
+#    <host name>:<vserver name>:<monitor status (running | stopped)>
+#
+#  * Monitor parameters may be independently defined for each vserver
+#    with '$CDIR/<vserver name>/monitor.conf'.
+#
+#  * Monitor will not start for stopped vservers.
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+
+function get_pid {
+	ps ax |grep "/vs-monitor.daemon -n $1 " |grep -v grep |awk '{print $1}'
+}
+function start {
+	exec /usr/lib/vs-tools/vs-monitor.daemon -n $1 -m </dev/null 2>/dev/null >/dev/null &
+	sleep 1
+}
+
+function stop {
+	local pid
+	pid=$(get_pid $1)
+	if [ "$pid" ] ; then
+		kill $pid
+		sleep 1
+	fi
+}
+
+function status {
+	local pid
+	pid=$(get_pid $1)
+	echo -en "$(hostname -s):$1:"
+	if [ "$pid" ] ; then
+		echo running
+	else
+		echo stopped
+	fi
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case $1 in
+		--help)
+			help
+			exit
+		;;
+		--name)
+			shift
+			NAME=$1
+		;;
+		--all)
+			NAME="$(get_vservers_list)"
+		;;
+		--start|--restart)
+			ACTION=start
+		;;
+		--stop)
+			ACTION=stop
+		;;
+	esac
+	shift
+done
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+
+for name in $NAME ; do
+
+	if [ "$(test_dirs $name)" ] ; then
+
+		case $ACTION in
+			start)
+				if [ $(get_pid $name) ] ; then
+					stop $name
+				fi
+				start $name
+			;;
+			stop)
+				stop $name
+			;;
+		esac
+
+		status $name
+
+	fi
+
+done
+
+success

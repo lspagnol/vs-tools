@@ -1,0 +1,250 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+##----------------------------------------------------------------------------------------------------
+## Functions
+
+function get_vserver_netstats {
+	chbind --silent --ip $IP -- chcontext --xid $CONTEXT -- netstat -npl \
+		|tr -s "[[:blank:]]" \
+		|sed -e "s/ $//g ;  s/\[ ACC \]/\[ACC\]/g" \
+		|cut -d" " -f1,4- \
+		|egrep "^unix |((^tcp |^udp )$IP:)" \
+		|grep -v " -$"
+}
+
+function monitor_alert {
+	local file
+	file="/tmp/monitor_alert_$(date +%s).sh"
+	if [ "$M_SENDMAIL" ] ; then
+
+##
+## Begin report script
+##
+
+cat<<EOF>$file
+ #!/bin/bash
+ echo "** $(date)"
+ echo
+ echo "** Host stats:"
+ vs-functions get_host_stats
+ echo
+ echo "** Vserver stats:"
+ vs-functions get_vserver_stats $NAME
+ echo
+ echo "** Results for 'ps auxf':"
+ chcontext --xid $CONTEXT -- ps auxf
+ echo
+EOF
+
+if [ "$old_netstats" == "$new_netstats" ] ; then
+
+cat<<EOF>>$file
+ echo "** Results for 'netstat -npl':"
+ cat /tmp/new_netstats.$NAME
+ echo
+EOF
+
+else
+
+cat<<EOF>>$file
+ echo "** Old results for 'netstat -npl':"
+ cat /tmp/old_netstats.$NAME
+ echo
+ echo "** New results for 'netstat -npl':"
+ cat /tmp/new_netstats.$NAME
+ echo
+ echo "** Diff between old and new 'netstat -npl':"
+ diff /tmp/old_netstats.$NAME /tmp/new_netstats.$NAME |egrep "<|>" |sed -e "s/</old:/g ; s/>/new:/g"
+ echo
+EOF
+
+fi
+
+cat<<EOF>>$file
+ echo "** Results for 'ls -laR $VDIR/$NAME/tmp'"
+ ls -laR $VDIR/$NAME/tmp
+ echo
+ echo "** $(date)"
+EOF
+
+##
+## End report script
+##
+
+		sh $file |mail -s "$(hostname -s):$NAME:$1" $MONITOR_MAILTO
+		rm $file
+	fi
+	if [ "$M_VERBOSE" ] ; then
+		echo "$(hostname -s):$NAME:$1"
+	fi
+}	 
+
+##----------------------------------------------------------------------------------------------------
+## Read args
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		-n)
+			shift
+			NAME=$1
+			;;
+		-v)
+			M_VERBOSE=1
+			;;
+		-m)
+			M_SENDMAIL=1
+			;;
+	esac
+	shift
+done
+
+if [ ! "$NAME" ] ||  [ ! "$(test_dirs $NAME)" ] ; then
+	exit
+fi
+
+if [ -f $CDIR/$NAME/monitor.conf ] ; then
+	. $CDIR/$NAME/monitor.conf
+fi
+
+if [ ! "$MONITOR_MAILTO" ] || [ ! "$(test_running $NAME)" ]; then
+	exit
+fi
+	
+IP=$(get_ip_address $NAME)
+CONTEXT=$(get_context $NAME)
+
+old_rss_hits=$(get_vserver_stats $NAME rss_hits |cut -d":" -f2)
+old_proc_hits=$(get_vserver_stats $NAME proc_hits |cut -d":" -f2)
+old_netstats="$(get_vserver_netstats)"
+
+##----------------------------------------------------------------------------------------------------
+## Daemon loop
+
+while [ true ] ; do
+
+	if [ ! "$(test_running $NAME)" ] && [ ! "$A_RUNNING" ] ; then
+		A_RUNNING=1
+		monitor_alert "vserver is stopped"
+	elif [ "$(test_running $NAME)" ] && [ "$A_RUNNING" ] ; then
+		unset A_RUNNING
+		monitor_alert "vserver is running again"
+	fi
+
+
+	if [ "$(test_running $NAME)" ] ; then
+
+		if [ "$MONITOR_SOCKETS" ] ; then
+			new_netstats="$(get_vserver_netstats)"
+			if [ "$old_netstats" != "$new_netstats" ] ; then
+				echo "$old_netstats" > /tmp/old_netstats.$NAME
+				echo "$new_netstats" > /tmp/new_netstats.$NAME
+				monitor_alert "listening sockets altered"
+				old_netstats="$new_netstats"
+				rm /tmp/old_netstats.$NAME
+				rm /tmp/new_netstats.$NAME
+			fi
+		fi
+
+		if [ "$MONITOR_RSS_HITS" ] ; then
+			rss_hits=$(get_vserver_stats $NAME rss_hits |cut -d":" -f2)
+			if [ $rss_hits -gt $old_rss_hits ] && [ ! "$A_RSS_HITS" ] ; then
+				A_RSS_HITS=1
+				monitor_alert "rss hits counter was increased from $old_rss_hits to $rss_hits"
+			elif [ $rss_hits -eq $old_rss_hits ] && [ "$A_RSS_HITS" ] && [ ! "$A_RSS" ] ; then
+				unset A_RSS_HITS
+				monitor_alert "rss hits counter does not increase any more"
+			fi
+			old_rss_hits=$rss_hits
+		fi
+
+		if [ "$MONITOR_PROC_HITS" ] ; then
+			proc_hits=$(get_vserver_stats $NAME proc_hits |cut -d":" -f2)
+			if [ $proc_hits -gt $old_proc_hits ] && [ ! "$A_PROC_HITS" ] ; then
+				A_PROC_HITS=1
+				monitor_alert "proc hits counter was increased from $old_proc_hits to $proc_hits"
+			elif [ $proc_hits -eq $old_proc_hits ] && [ "$A_PROC_HITS" ] && [ ! "$A_PROC" ] ; then
+				unset A_PROC_HITS
+				monitor_alert "proc hits counter does not increase any more"
+			fi
+			old_proc_hits=$proc_hits
+		fi
+
+		rss_threshold=$((100*$(get_rss_limit $NAME)))
+		if [ $rss_threshold -gt $RSS_THRESHOLD ] && [ ! "$A_RSS" ] ; then
+			A_RSS=1
+			monitor_alert "threshold exceeded ($rss_threshold% instead of $RSS_THRESHOLD% for rss limit)"
+		elif [ $rss_threshold -lt $RSS_THRESHOLD ] && [ "$A_RSS" ] ; then
+			unset A_RSS
+			monitor_alert "threshold not exceeded any more ($rss_threshold% instead of $RSS_THRESHOLD% for rss limit)"
+		fi
+
+		proc_threshold=$((100*$(get_proc_limit $NAME)))
+		if [ $proc_threshold -gt $PROC_THRESHOLD ] && [ ! "$A_PROC" ] ; then
+			A_PROC=1
+			monitor_alert "threshold exceeded ($proc_threshold% instead of $PROC_THRESHOLD% for proc limit)"
+		elif [ $proc_threshold -lt $PROC_THRESHOLD ] && [ "$A_PROC" ] ; then
+			unset A_PROC
+			monitor_alert "threshold not exceeded any more ($proc_threshold% instead of $PROC_THRESHOLD% for proc limit)"
+		fi
+
+		tmpfs_threshold=$((100*$(get_tmpfs_limit $NAME)))
+		if [ $tmpfs_threshold -gt $TMPFS_THRESHOLD ] && [ ! "$A_TMPFS" ] ; then
+			A_TMPFS=1
+			monitor_alert "threshold exceeded ($tmpfs_threshold% instead of $TMPFS_THRESHOLD% for tmpfs limit)"
+		elif [ $tmpfs_threshold -lt $TMPFS_THRESHOLD ] && [ "$A_TMPFS" ] ; then
+			unset A_TMPFS
+			monitor_alert "threshold not exceeded any more ($tmpfs_threshold% instead of $TMPFS_THRESHOLD% for tmpfs limit)"
+		fi
+
+		if [ "$LOADAVG_1_THRESHOLD" ] ; then
+			loadavg_1=$(get_vserver_stats $NAME loadavg_1 |cut -d":" -f2)
+			if [ $(echo "$loadavg_1 > $LOADAVG_1_THRESHOLD" |bc) -eq 1 ] && [ ! "$A_LOADAVG_1" ] ; then
+				A_LOADAVG_1=1
+				monitor_alert "threshold exceeded ($loadavg_1 instead of $LOADAVG_1_THRESHOLD for loadavg_1 limit)"
+			elif [ $(echo "$loadavg_1 > $LOADAVG_1_THRESHOLD" |bc) -eq 0 ] && [ "$A_LOADAVG_1" ] ; then
+				unset A_LOADAVG_1
+				monitor_alert "threshold not exceeded any more ($loadavg_1 instead of $LOADAVG_1_THRESHOLD for loadavg_1 limit)"
+			fi
+		fi
+
+		if [ "$LOADAVG_5_THRESHOLD" ] ; then
+			loadavg_5=$(get_vserver_stats $NAME loadavg_5 |cut -d":" -f2)
+			if [ $(echo "$loadavg_5 > $LOADAVG_5_THRESHOLD" |bc) -eq 1 ] && [ ! "$A_LOADAVG_5" ] ; then
+				A_LOADAVG_5=1
+				monitor_alert "threshold exceeded ($loadavg_5 instead of $LOADAVG_5_THRESHOLD for loadavg_5 limit)"
+			elif [ $(echo "$loadavg_5 > $LOADAVG_5_THRESHOLD" |bc) -eq 0 ] && [ "$A_LOADAVG_5" ] ; then
+				unset A_LOADAVG_5
+				monitor_alert "threshold not exceeded any more ($loadavg_5 instead of $LOADAVG_5_THRESHOLD for loadavg_5 limit)"
+			fi
+		fi
+
+		if [ "$LOADAVG_15_THRESHOLD" ] ; then
+			loadavg_15=$(get_vserver_stats $NAME loadavg_15 |cut -d":" -f2)
+			if [ $(echo "$loadavg_15 > $LOADAVG_15_THRESHOLD" |bc) -eq 1 ] && [ ! "$A_LOADAVG_15" ] ; then
+				A_LOADAVG_15=1
+				monitor_alert "threshold exceeded ($loadavg_15 instead of $LOADAVG_15_THRESHOLD for loadavg_15 limit)"
+			elif [ $(echo "$loadavg_15 > $LOADAVG_15_THRESHOLD" |bc) -eq 0 ] && [ "$A_LOADAVG_15" ] ; then
+				unset A_LOADAVG_15
+				monitor_alert "threshold not exceeded any more ($loadavg_15 instead of $LOADAVG_15_THRESHOLD for loadavg_15 limit)"
+			fi
+		fi
+
+		disk_threshold=$((100*$(get_disk_limit $NAME)))
+		if [ $disk_threshold -gt $DISK_THRESHOLD ] && [ ! "$A_DISK" ] ; then
+			A_DISK=1
+			monitor_alert "threshold exceeded ($disk_threshold% instead of $DISK_THRESHOLD% for disk limit)"
+		elif [ $disk_threshold -lt $DISK_THRESHOLD ] && [ "$A_DISK" ] ; then
+			unset A_DISK
+			monitor_alert "threshold not exceeded any more ($disk_threshold% instead of $DISK_THRESHOLD% for disk limit)"
+		fi
+
+	fi
+
+	if [ "$M_VERBOSE" ] ; then
+		sleep 5
+	else
+		sleep $MONITOR_POOLING
+	fi
+
+done

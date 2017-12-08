@@ -1,0 +1,128 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ---------------------------------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: set or show ressources limits
+#
+#Args:     --name <vserver name> / [ --all ]
+#
+#        [ --rss <physical memory limit> ]
+#        [ --disk <disk limit> ]
+#        [ --tmpfs <tmpfs limit> ]
+#        [ --proc <max procs> ]
+#        [ --cpu <ratio for max cpu usage> ]
+#
+#  * 'rss', 'disk', and 'tmpfs' are given and displayed in MB.
+#
+#  * '--all' will do action for all vservers on this host.
+#
+#  * The obtainment of disk usage may be long in some cases.
+#
+#  * Output format:
+#    <host name>:<vserver name>:<rss usage/limit>:<disk usage/limit>:
+#    <tmpfs usage/limit>:<proc usage/limit>:<ratio for max cpu usage>
+#
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+		--all)
+			NAME="$(get_vservers_list)"
+			;;
+		--rss)
+			if [ "$(test_value $2)" = "integer positive" ] ; then
+				shift
+				RSS=$1
+			fi
+			;;
+		--disk)
+			if [ "$(test_value $2)" = "integer positive" ] ; then
+				shift
+				DISK=$1
+			fi
+			;;
+		--tmpfs)
+			if [ "$(test_value $2)" = "integer positive" ] ; then
+				shift
+				TMPFS=$1
+			fi
+			;;
+		--proc)
+			if [ "$(test_value $2)" = "integer positive" ] ; then
+				shift
+				PROC=$1
+			fi
+			;;
+		--cpu)
+			if [ "$(test_value $2)" = "rational positive" ] ; then
+				shift
+				CPU=$1
+			fi
+			;;
+	esac
+	shift
+done
+
+# ---------------------------------------------------------------------------------------------------------
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+
+for name in $NAME ; do
+
+	if [ ! "$(test_dirs $name)" ] ; then
+		abort "vserver '$name' was not found"
+	fi
+
+	echo -en "$(hostname -s):$name:"
+
+	if [ "$RSS" ] ; then
+		set_rss_limit $name $RSS
+	fi
+
+	if [ "$DISK" ] ; then
+		set_disk_limit $name $DISK
+	fi
+
+	if [ "$TMPFS" ] ; then
+		set_tmpfs_limit $name $TMPFS
+	fi
+
+	if [ "$PROC" ] ; then
+		set_proc_limit $name $PROC
+	fi
+
+	if [ "$CPU" ] ; then
+		set_cpu_limit $name $CPU
+	fi
+		
+	echo -en "$(get_rss_limit $name):"
+	echo -en "$(get_disk_limit $name):"
+	echo -en "$(get_tmpfs_limit $name):"
+	echo -en "$(get_proc_limit $name):"
+	echo "$(get_cpu_limit $name)"
+
+done
+
+success

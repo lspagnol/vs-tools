@@ -1,0 +1,44 @@
+## ----------------------------------------------------------------------
+## This file is a copy of '/etc/vs-tools/firewall.conf'.
+## NOTE: the vserver and his host are implicitly isolated.
+## ----------------------------------------------------------------------
+
+## Uncomment the following line to enable firewalling
+#enable
+
+## Uncomment the following line to enble logging on REJECT and DROP targets
+#log
+
+## <action> <direction> <address,address...> [<direction>] <proto/port,proto/port...>
+
+## action    : allow | deny
+## direction : from | to
+##            'from' for source address (destination address of vserver is implicit)
+##            'to' for destination address (source address of vserver is implicit)
+## address   : ip[ /netmask | /prefix ]
+## direction : from | to
+##            'from' for source port
+##            'to' for destination port
+##             If nothing is specified, the rule is implicitly for source and destination
+## proto     : tcp | udp
+## port      : tcp or udp port
+
+## TIPS      : Use 0/0 instead of 0.0.0.0/0.0.0.0
+##             You may use ports ranges such as '2000:2005', '2000:' or ':2000'
+##             You may use FQDN instead of ip address
+
+## Policy is ACCEPT
+## ESTABLISHED,RELATED is implicit
+
+#allow to 0/0 to udp/53 	# DNS request
+
+#allow to 0/0 to tcp/21		# FTP
+#allow from 0/0 from tcp/20	# FTP-data
+#allow to 0/0 to tcp/80		# HTTP
+#allow to 0/0 to tcp/11371	# PGP-keys
+
+#allow from 0/0 to udp/161	# Local SNMP
+#allow from 0/0 to tcp/22	# Local SSH
+#allow from 0/0 to tcp/80	# Local HTTP
+
+## DENY is implicit

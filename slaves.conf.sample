@@ -1,0 +1,18 @@
+## ----------------------------------------------------------------------
+## This file describes slaves list and configuration
+## Uncomment and edit the following lines ONLY on 'master' host
+## ----------------------------------------------------------------------
+
+## <host>[:option1,option2,option3]
+
+## Options should be:
+
+## noselect              : host won't be auto-selected
+## compress              : enable rsync compression
+## bwlimit=<limit><k|m>  : bandwidth limit in Kpbs (k) or Mbps (m)
+
+#slave1
+#slave2:noselect
+#slave3:compress
+#slave4:bwlimit=50
+#slave5:compress,bwlimit=50

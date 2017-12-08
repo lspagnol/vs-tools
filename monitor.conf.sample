@@ -1,0 +1,30 @@
+## ----------------------------------------------------------------------
+## This file is a copy of '/etc/vs-tools/monitor.conf'.
+## ----------------------------------------------------------------------
+
+## Uncomment the following line to enable monitoring
+#MONITOR_MAILTO=root
+
+## Pooling time in seconds
+MONITOR_POOLING=60
+
+## Ressources thresholds in percent
+RSS_THRESHOLD=90
+DISK_THRESHOLD=90
+TMPFS_THRESHOLD=90
+PROC_THRESHOLD=90
+
+## Load average threshold value
+## You must use only one of them
+#LOADAVG_1_THRESHOLD=2
+#LOADAVG_5_THRESHOLD=2
+LOADAVG_15_THRESHOLD=2
+
+## Comment the following lines to disable these monitors
+
+## Kernel counters
+MONITOR_RSS_HITS=yes
+MONITOR_PROC_HITS=yes
+
+## Unix and network sockets
+MONITOR_SOCKETS=yes

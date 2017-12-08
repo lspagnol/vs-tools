@@ -1,0 +1,440 @@
+#!/bin/bash
+. /usr/lib/vs-tools/functions.sh
+
+begin
+
+# ------------------------------------------------------------------------------
+
+function help {
+sed -e "s/^#//g"<<EOF
+#
+#Usage:    $(basename $0) <Args>
+#
+#Function: create vserver guest with 'debootstrap', 'template', or 'clone'
+#          method.
+#
+#Args:     --name <vserver name>
+#          --interface [<net device>:]<ip>[/<CIDR>]
+#
+#         [--template] [<full path/name of tgz template file>]
+#			OR
+#         [--clone <vserver name>]
+#			OR
+#         [--debootstrap] [<distro (sarge | woody | lenny ...)>]
+#
+#         [--context <context number>]
+#         [--domain <domain name>]
+#         [--name_server <ip of name server>]
+#         [--disk <disk limit in MB>]
+#         [--tmpfs <tmpfs limit in MB> ]
+#         [--rss <physical memory limit in MB>]
+#         [--proc <max number of processes>]
+#         [--cpu <max usage of one processor>]
+#         [--enable]
+#
+#  * <vserver name> is a short name, NOT a FQDN !
+#
+#  * 'CIDR' may be set as prefix or netmask ( /255.255.255.0 or /24 )
+#
+#  * 'cpu_limit' must be set as a ratio ( 1/2 , 1/3 , 3/4 ... )
+#
+#  * 'enable' set guest to be controled with '/etc/init.d/vserver_default'.
+#
+#  * If 'context' is not set, it will be 'ip_number + (1000 * vlan_id)'
+#    Depending on your kernel configuration, 'context' is a 16 bits number.
+#    So you must give a value if 'vlan_id' is greater than 64.
+#
+#  * Default values are defined in '/etc/vs-tools/vs-tools.conf'.
+#
+#  * You can permit the use of several networks on the vservers hosts by
+#    editing '$NETWORKS_CONF'. Thus the network configuration
+#    will be entirely automatic.
+#
+#  * Templates may be created by:
+#      mkdir $VDIR/TEMPLATES
+#      vserver <vserver name> exec apt-get clean
+#      vserver <vserver name> stop
+#      cd $VDIR/<vserver name>
+#      tar -czf $VDIR/TEMPLATES/<vserver name>.tgz *
+#
+EOF
+}
+
+PARAMS=" --help --template --debootstrap --clone --name --domain --name_server \
+--interface --context --disk --disk --tmpfs --rss --vm --proc --cpu --enable "
+
+# --------------------------------------------------------------------------------------
+# Read arguments
+
+while [ $# -gt 0 ] ; do
+	case "$1" in
+		--help)
+			help
+			exit 0
+			;;
+		--template)
+			METHOD=template
+			if [ ! "$(echo "$PARAMS" | grep " $2 ")" ] ; then
+				shift
+				TEMPLATE=$1
+			fi
+			;;
+		--debootstrap)
+			METHOD=debootstrap
+			if [ ! "$(echo "$PARAMS" | grep " $2 ")" ] ; then
+				shift
+				DISTRO=$1
+			fi
+			;;
+		--clone)
+			METHOD=clone
+			if [ ! "$(echo "$PARAMS" | grep " $2 ")" ] ; then
+				shift
+				CLONE=$1
+			fi
+			;;
+		--name)
+			shift
+			NAME=$1
+			;;
+		--domain)
+			shift
+			DOMAIN=$1
+			;;
+		--name_server)
+			shift
+			NAMESERVER=$1
+			;;
+		--interface)
+			shift
+			INTERFACE=$1
+			;;
+		--context)
+			shift
+			CONTEXT=$1
+			;;
+		--disk)
+			shift
+			DISK_LIMIT=$1
+			;;
+		--tmpfs)
+			shift
+			TMPFS_LIMIT=$1
+			;;
+		--rss)
+			shift
+			RSS_LIMIT=$1
+			;;
+		--vm)
+			shift
+			VM_LIMIT=$1
+			;;
+                --proc)
+                	shift
+                	PROC_LIMIT=$1
+                	;;
+		--cpu)
+		        shift
+		        CPU_LIMIT=$1
+		        ;;
+		--enable)
+			VSERVER_MARK="default"
+			;;
+	esac
+	shift
+done
+
+# --------------------------------------------------------------------------------------
+# Checking arguments
+
+if [ ! "$NAME" ] ; then
+	abort "vserver name missing"
+fi
+
+if [ "$(test_vdir $NAME)" ] ; then
+	abort "$VDIR/$NAME: directory already exists"
+fi
+
+if [ "$(test_cdir $NAME)" ] ; then
+	abort "$CDIR/$NAME: directory already exists"
+fi
+
+if [ ! "$INTERFACE" ] ; then
+	abort "--interface <NET_DEVICE>:<IP>/<CIDR> is required"
+fi
+
+INTERFACE=$(forge_net_config $INTERFACE)
+if [ ! "$INTERFACE" ] ; then
+	abort "bad interface value"
+fi
+
+IP=$(echo $INTERFACE |cut -d ":" -f2 |cut -d "/" -f1)
+DEV=$(echo $INTERFACE |cut -d ":" -f1)
+PREFIX=$(echo $INTERFACE |cut -d "/" -f2)
+
+if [ "$(test_ping $IP)" ] ; then
+	abort "$IP already in use elsewhere"
+fi
+
+if [ ! "$CONTEXT" ] ; then
+	if [ ! "$CONTEXT_METHOD" ] ; then
+		abort "context number is required"
+	fi
+	if [ "$(test_vlan_dev $DEV)" ] ; then
+		VLAN=$(echo $DEV |cut -d "." -f2)
+	fi
+	CONTEXT="$(create_context_number $CONTEXT_METHOD $IP $VLAN)"
+	if [ "$CONTEXT_METHOD" == "cnt" ] ; then
+		CONTEXT_METHOD=inc
+	fi
+fi
+
+if [ ! "$(test_context_value $CONTEXT)" ] ; then
+	abort "bad context value"
+fi
+
+if [ ! "$METHOD" ] && [ "$DEFAULT_METHOD" ] ; then
+	METHOD=$DEFAULT_METHOD
+fi
+
+if [ ! "$DISTRO" ] && [ "$DEFAULT_DISTRO" ] ; then
+	DISTRO=$DEFAULT_DISTRO
+fi
+
+if [ ! "$TEMPLATE" ] && [ "$DEFAULT_TEMPLATE" ] ; then
+	TEMPLATE=$DEFAULT_TEMPLATE
+fi
+
+if [ "$METHOD" == "template" ] ; then
+	if [ ! "$TEMPLATE" ] ; then
+		abort "full path/name is requided"
+	fi
+	if [ ! -f $TEMPLATE ] ; then
+		abort "'$TEMPLATE' does not exist"
+	fi
+	if [ ! "$(file $TEMPLATE |grep "gzip compressed data")" ] ; then
+		abort "'$TEMPLATE' is not a 'tgz' file"
+	fi
+fi
+
+if [ "$METHOD" == "clone" ] ; then
+	if [ ! "$(test_dirs $CLONE)" ] ; then
+		abort "vserver '$CLONE' was not found"
+	fi
+	if [ "$(test_running $CLONE)" ] ; then
+		warning "vserver '$CLONE' is running"
+	fi
+fi
+
+
+if [ -f $NETWORKS_CONF ] ; then
+	for value in $(cat $NETWORKS_CONF |grep -v "^#" |grep -v "^$") ; do
+		network=$(echo $value |cut -d":" -f2)
+		if [ "$(test_ip_on_network $IP $network)" ] ; then
+			NETWORK=$network
+			GATEWAY=$(echo $value |cut -d":" -f3)
+			NAMESERVER=$(echo $value |cut -d":" -f4)
+			DOMAIN=$(echo $value |cut -d":" -f5)
+		fi
+	done
+fi
+
+if [ ! "$GATEWAY" ] ; then
+	GATEWAY=$(ip route |grep "^default" |cut -d" " -f3)
+fi
+
+if [ ! "$DOMAIN" ] ; then
+	DOMAIN=$DEFAULT_DOMAIN
+fi
+
+if [ ! "$NAMESERVER" ] ; then
+	NAMESERVER=$DEFAULT_NAMESERVER
+fi
+
+if [ ! "$(test_address_value $NAMESERVER)" ] ; then
+	abort "bad nameserver value"
+fi
+
+if [ ! "$DISK_LIMIT" ] ; then
+	if [ "$METHOD" == "clone" ] ; then
+		DISK_LIMIT=$(get_disk_limit $CLONE |cut -d"/" -f2)
+	else
+		DISK_LIMIT=$DEFAULT_DISK_LIMIT
+	fi
+fi
+
+if [ ! "$TMPFS_LIMIT" ] ; then
+	if [ "$METHOD" == "clone" ] ; then
+		TMPFS_LIMIT=$(get_tmpfs_limit $CLONE |cut -d"/" -f2)
+	else
+		TMPFS_LIMIT=$DEFAULT_TMPFS_LIMIT
+	fi
+fi
+
+if [ ! "$RSS_LIMIT" ] ; then
+	if [ "$METHOD" == "clone" ] ; then
+		RSS_LIMIT=$(get_rss_limit $CLONE |cut -d"/" -f2)
+	else
+		RSS_LIMIT=$DEFAULT_RSS_LIMIT
+	fi
+fi
+
+if [ ! "$PROC_LIMIT" ] ; then
+	if [ "$METHOD" == "clone" ] ; then
+		PROC_LIMIT=$(get_proc_limit $CLONE |cut -d"/" -f2)
+	else
+		PROC_LIMIT=$DEFAULT_PROC_LIMIT
+	fi
+fi
+
+if [ ! "$CPU_LIMIT" ] ; then
+	if [ "$METHOD" == "clone" ] ; then
+		CPU_LIMIT=$(get_cpu_limit $CLONE)
+	else
+		CPU_LIMIT=$DEFAULT_CPU_LIMIT
+	fi
+fi
+
+# --------------------------------------------------------------------------------------
+
+echo
+warning "Please check parameters"
+
+cat<<EOF
+--------------------------------
+
+Name.............: $NAME
+Domain...........: $DOMAIN
+Name server......: $NAMESERVER
+Context number...: $CONTEXT
+
+Device...........: $DEV
+Address..........: $IP
+Netmask..........: $(get_netmask_from_prefix $PREFIX)
+Gateway..........: $GATEWAY
+Prefix...........: $PREFIX
+
+Memory limit.....: $RSS_LIMIT MB
+Disk limit.......: $DISK_LIMIT MB
+Tmpfs limit......: $TMPFS_LIMIT MB
+Procs limit......: $PROC_LIMIT
+CPU limit........: $CPU_LIMIT 
+
+EOF
+
+echo "Real OS release..: $(uname -r)"
+echo "Fake OS release..: $(uname -r |cut -d- -f1)"
+echo
+
+if [ "$METHOD" == "template" ]; then
+	echo "Build method.....: $METHOD"
+	echo "Template file....: $TEMPLATE"
+	TEMPLATE_DESC=$(echo $TEMPLATE |sed -e "s/\.tgz$/\.info/g")
+	if [ -f $TEMPLATE_DESC ] ; then
+		echo "Template desc....: $TEMPLATE_DESC"
+		echo
+		cat $TEMPLATE_DESC
+	fi
+	echo
+	confirm "Build vserver"
+	create_vdir $NAME
+	populate_vdir_template $NAME $TEMPLATE
+	populate_vdir_devs $NAME
+elif [ "$METHOD" == "debootstrap" ] ; then
+	echo "Build method.....: $METHOD"
+	echo "Distro...........: $DISTRO"
+	echo
+	confirm "Build vserver"
+	create_vdir $NAME
+	populate_vdir_debootstrap $NAME $DISTRO
+elif [ "$METHOD" == "clone" ] ; then
+	echo "Build method.....: $METHOD"
+	echo "Template path....: $VDIR/$CLONE"
+	echo
+	confirm "Build vserver"
+	create_vdir $NAME
+	populate_vdir_clone $NAME $CLONE
+else
+	abort "build method required ( --template | --debootstrap | --clone )"
+fi
+
+create_cdir $NAME
+create_links $NAME
+
+notice "Configuring vserver ..."
+
+fake_os $NAME
+set_config $NAME $DEV $IP $PREFIX $CONTEXT $DOMAIN $NAMESERVER
+set_context_flags $NAME
+set_context_capabilities $NAME
+
+if [ "$CPU_LIMIT" ] ; then
+	set_cpu_limit $NAME $CPU_LIMIT
+fi
+
+if [ "$RSS_LIMIT" ] ; then
+	set_rss_limit $NAME $RSS_LIMIT
+fi
+
+if [ "$PROC_LIMIT" ] ; then
+	set_proc_limit $NAME $PROC_LIMIT
+fi
+
+if [ "$VSERVER_MARK" ] ; then
+	enable $NAME
+fi
+
+# Post-start script
+cat<<EOF > $VDIR/$NAME/root/post-start.sh
+#!/bin/bash
+echo
+cat /proc/version
+echo
+echo "Name.......: \$(hostname -s)"
+echo "FQDN.......: \$(hostname -f)"
+echo "Addresses..: \$(hostname -i)"
+echo
+free
+echo
+df -h
+echo
+EOF
+
+# --------------------------------------------------------------------------------------
+
+chmod 700 $VDIR/$NAME/root
+set_fstab $NAME
+set_disk_limit $NAME $DISK_LIMIT
+set_tmpfs_limit $NAME $TMPFS_LIMIT
+cp /etc/vs-tools/firewall.conf $CDIR/$NAME/firewall.conf
+cp /etc/vs-tools/monitor.conf $CDIR/$NAME/monitor.conf
+
+# --------------------------------------------------------------------------------------
+
+if [ "$CONTEXT_METHOD" == "inc" ] ; then
+	create_context_number cnt inc
+fi
+
+# Starting vserver
+vserver $NAME start
+
+# Running post-start script in vserver context
+vserver $NAME exec sh /root/post-start.sh
+
+sleep 1
+vserver-stat
+echo
+
+if [ -f $VDIR/$NAME/root/post-start.sh ] ; then 
+	rm $VDIR/$NAME/root/post-start.sh
+fi
+
+# Running post-install script in vserver context
+# (Usefull with methods 'template' and 'clone')
+if [ -f $VDIR/$NAME/root/post-install.sh ] ; then
+	vserver $NAME exec sh /root/post-install.sh
+fi
+
+# --------------------------------------------------------------------------------------
+
+success
